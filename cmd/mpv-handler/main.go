@@ -181,18 +181,21 @@ func uninstallProtocol(scheme string) error {
 }
 
 // extractSchemeAndPayload returns (scheme, payload) from "scheme://payload"
+// IMPORTANT: Do NOT use url.Parse here. For links like
+//   mpv://https%3A%2F%2Fexample.com%2Fvideo.mkv
+// net/url will treat the payload as host(authority) and reject '%' as invalid host encoding.
 func extractSchemeAndPayload(raw string) (string, string, error) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" {
+	const sep = "://"
+	i := strings.Index(raw, sep)
+	if i <= 0 {
 		return "", "", fmt.Errorf("invalid url: %s", raw)
 	}
-	scheme := u.Scheme
-	// We want everything after "scheme://"
-	prefix := scheme + "://"
-	if !strings.HasPrefix(raw, prefix) {
-		return "", "", fmt.Errorf("invalid url prefix")
+	scheme := raw[:i]
+	payload := raw[i+len(sep):]
+	if strings.TrimSpace(scheme) == "" || strings.TrimSpace(payload) == "" {
+		return "", "", fmt.Errorf("invalid url: %s", raw)
 	}
-	return scheme, raw[len(prefix):], nil
+	return scheme, payload, nil
 }
 
 // handleURL processes the URL and launches mpv with profile + UA + URL
@@ -212,7 +215,10 @@ func handleURL(raw string, cfg *Config) error {
 		writeLog(cfg.EnableLog, cfg.LogPath, fmt.Sprintf("Decode error: %v", err))
 		return err
 	}
-	decoded = strings.TrimSuffix(decoded, "/") // 防你之前那种末尾误带 /
+
+	// 防止浏览器/handler 在末尾误带 "/"（有时甚至是多段 "////"）
+	decoded = strings.Trim(decoded, "/")
+
 	writeLog(cfg.EnableLog, cfg.LogPath, fmt.Sprintf("Decoded URL: %s", decoded))
 
 	if _, err := os.Stat(cfg.MpvPath); err != nil {
@@ -239,6 +245,9 @@ func handleURL(raw string, cfg *Config) error {
 				break
 			}
 		}
+	} else {
+		// 不致命：URL parse 失败也照样可播放
+		writeLog(cfg.EnableLog, cfg.LogPath, "Could not parse decoded URL for UA matching; continuing.")
 	}
 
 	if userAgent != "" {
@@ -306,6 +315,7 @@ func main() {
 			}
 			fmt.Println("Protocol uninstalled:", scheme)
 			return
+
 		default:
 			// Treat as URL
 			if err := handleURL(os.Args[1], cfg); err != nil {
