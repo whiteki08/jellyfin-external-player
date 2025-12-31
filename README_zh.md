@@ -1,6 +1,6 @@
 # Jellyfin MPV Desktop Bridge (Fork)
 
-[English](https://www.google.com/search?q=%23english-version)
+[English](./README.md)
 
 这是一个基于 [mpv-handler-openlist](https://github.com/outlook84/mpv-handler-openlist) 进行深度重构的高级播放器桥接工具。
 
