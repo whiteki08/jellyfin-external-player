@@ -1,65 +1,106 @@
-# mpv-handler-openlist (中文)
+# Jellyfin MPV Desktop Bridge (Fork)
 
-[English](./README.md)
+[English](https://www.google.com/search?q=%23english-version)
 
-这是一个为 Windows 平台上的 [mpv](https://mpv.io/) 或 [mpv.net](https://github.com/mpvnet-player/mpv.net) 媒体播放器设计的 URL 协议注册器 (`mpv://`)。该工具用于在 [OpenList](https://github.com/OpenListTeam/OpenList) Web 网页上调用 mpv 或 mpv.net 播放器来打开视频链接。
+这是一个基于 [mpv-handler-openlist](https://github.com/outlook84/mpv-handler-openlist) 进行深度重构的高级播放器桥接工具。
 
-## 功能特性
+虽然本项目起源于 `mpv-handler`，但我们已经对其核心逻辑进行了彻底的改造。它不再局限于简单的打开 URL，而是引入了全新的 **Universal Jelly-Player Schema**，旨在为 Jellyfin/Emby Web 端提供**桌面级的多窗口并发播放体验**。
 
-- **`mpv://` 协议**: 处理 `mpv://` 格式的 URL，用 mpv 或 mpv.net 打开视频。
-- **简易安装**: 通过简单的命令行指令进行安装和卸载。
-- **可配置**: `mpv.exe` 或 `mpvnet.exe` 的路径是可配置的。
-- **日志记录**: 提供可选的日志功能，方便排查问题。
-- **自定义 User-Agent**: 允许为特定的 URL 路径设置自定义的 User-Agent。
+## 核心创新 (Key Innovations)
 
-## 安装步骤
+与原版相比，本项目引入了以下颠覆性功能：
 
-1.  **下载**: 前往 [Releases 页面](https://github.com/outlook84/mpv-handler-openlist/releases) 下载最新的 `mpv-handler.exe` 文件。
-2.  **放置程序**: 将 `mpv-handler.exe` 移动到你电脑上的一个固定位置（例如，mpv 或 mpv.net 播放器的文件夹内）。
-3.  **注册协议**: 在 `mpv-handler.exe` 所在的目录中 **以管理员身份** 打开命令提示符或 PowerShell，然后运行以下命令。**请务必将路径替换为你自己电脑上 `mpv.exe` 或 `mpvnet.exe` 的实际路径**。
+1. **通用协议架构 (Universal Jelly-Player Schema)**
+* 弃用了单一的 `mpv://` 协议，采用全新的 `jelly-player://` 通用协议。
+* **JSON Payload**：通过 Base64 编码传输复杂的 JSON 数据，支持携带标题、窗口坐标、字幕流、Profile 配置等丰富元数据。
 
-    ```shell
-    .\mpv-handler.exe --install "C:\你的路径\mpv.exe"
-    ```
 
-    如果成功，你将看到提示信息 "Protocol installed and mpv path saved."。同时，一个名为 `mpv-handler.ini` 的配置文件也会在同目录下被创建。
+2. **批量并发播放 (Batch Processing)**
+* **突破浏览器限制**：前端一次性发送包含多个视频信息的数组（Array Payload）。
+* **零延迟启动**：后端 Go 程序接收指令后，瞬间并发启动 4 个（或更多）MPV 进程，完美规避现代浏览器的弹窗拦截和焦点抢占问题。
 
-## 如何使用
 
-安装完成后，只需在 [OpenList](https://github.com/OpenListTeam/OpenList) Web 视频播放页面上点击 `mpv` 图标，就会自动调用播放器播放当前视频。
+3. **智能视频墙 (Smart Video Wall)**
+* **像素级精准排布**：配合配套的 UserScript，自动计算物理像素坐标。
+* **全屏沉浸体验**：支持覆盖任务栏的沉浸式 2x2 视频墙，或自动避开任务栏的工作区模式。
+* **字幕自动挂载**：自动通过 API 抓取 Jellyfin 的外挂字幕链接并传给 MPV。
 
-## 卸载
 
-要从你的系统中移除此 URL 协议，请在工具所在的目录 **以管理员身份** 打开命令提示符或 PowerShell，然后运行：
+4. **双向生态整合**
+* 本项目由 **Go 后端 (Handler)** 和 **前端脚本 (UserScript)** 两部分组成，缺一不可，共同构成了一套完整的播放解决方案。
 
+
+
+## 安装指南
+
+### 第一步：部署 Go 后端
+
+1. **下载**：前往 Releases 页面下载最新的 `mpv-handler.exe`。
+2. **放置**：将其放入任意固定目录（推荐放在 MPV 安装目录）。
+3. **注册协议**：以管理员身份运行 CMD/PowerShell，执行：
 ```shell
-.\mpv-handler.exe --uninstall
+.\mpv-handler.exe --install "D:\Path\To\Your\mpv.exe"
+
 ```
 
-## 配置文件
 
-本工具使用一个名为 `mpv-handler.ini` 的配置文件，它位于和主程序相同的目录下。
+*成功后，系统将注册 `jelly-player://` 协议。*
+
+### 第二步：配置 MPV (关键)
+
+为了实现无缝视频墙效果，您需要在 MPV 的 `portable_config/profiles.conf` 中添加专用配置（UserScript 会调用这个 `multi` profile）：
 
 ```ini
-[mpv-handler]
-mpvPath   = C:\你的路径\mpv.exe
-enableLog = false
-logPath   = mpv-handler.log
-[UserAgents]
-aaa/bbb = "pan.baidu.com"
-bbb/ccc = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0"
+[multi]
+profile-desc=Jellyfin Video Wall
+# 禁用吸附和边框，实现无缝拼接
+snap-window=no
+border=no
+ontop=yes
+# 禁用自动适配，完全听从前端指令
+autofit=no
+keepaspect-window=no
+# 性能优化
+osc=no
+osd-level=0
+force-window=immediate
+
 ```
 
-- `mpvPath`: mpv.exe 或 mpvnet.exe 的路径
-- `enableLog`: 设置为 true 来启用日志记录
-- `logPath`: 日志文件的路径
+### 第三步：安装 UserScript
 
-### 自定义 User-Agent
+1. 在浏览器安装 Tampermonkey 插件。
+2. 安装本仓库根目录下的 `script.js`。
+3. 在脚本头部配置您的 **Windows 缩放比例** (例如 `osScale: 2.0`)。
+4. 刷新 Jellyfin 网页，进入电影库，长按选中多个视频，点击出现的 **"Grid Play"** 按钮。
 
-您可以为特定路径下的视频源指定自定义的 User-Agent。
+## 协议规范 (Protocol Spec)
 
-配置的键是一个路径前缀，它将与 URL 中 `/d/` 之后的部分进行匹配。例如，对于 URL `https://.../d/aaa/bbb/ccc`，用于匹配的路径是 `aaa` 或 `aaa/bbb/`。
+如果您是开发者，您可以利用本项目的通用协议适配其他服务。
+协议格式：`jelly-player://<Base64_Safe_URL_Encoded_JSON>`
 
-## 许可证
+JSON Payload 示例 (Batch Mode):
 
-本项目基于 GNU General Public License v2.0 许可证。详情请参阅 [LICENSE](./LICENSE) 文件。
+```json
+[
+  {
+    "mode": "mpv",
+    "url": "https://server/stream.mkv",
+    "sub": "https://server/subtitle.srt",
+    "profile": "multi",
+    "geometry": "1920x1080+0+0",
+    "title": "Video 1"
+  },
+  {
+    "mode": "mpv",
+    "url": "https://server/stream2.mkv",
+    "geometry": "1920x1080+1920+0",
+    "title": "Video 2"
+  }
+]
+
+```
+
+## 致谢
+
+本项目 fork 自 [mpv-handler-openlist](https://github.com/outlook84/mpv-handler-openlist)。感谢原作者提供的基础架构，使我们能够在此基础上构建出如此强大的功能。
