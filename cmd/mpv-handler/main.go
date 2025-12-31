@@ -130,36 +130,55 @@ func parsePayload(rawURI string) (*Payload, error) {
 		return nil, fmt.Errorf("invalid scheme, must start with %s", prefix)
 	}
 
-	b64Str := strings.TrimPrefix(rawURI, prefix)
+	// 去除前缀
+	rawStr := strings.TrimPrefix(rawURI, prefix)
 
-	// 【核心修复逻辑】
-	// 不管前端发来的是 URL-Safe 还是 Standard，也不管有没有 Padding
-	// 我们统统手动转换成 "带 Padding 的 Standard Base64"
+	// 【暴力清洗逻辑】
+	// 不依赖 ReplaceAll，而是逐个字符重建字符串。
+	// 1. 扔掉所有不可见字符、空格、引号、垃圾符号。
+	// 2. 将 URL-Safe 的 '-' 和 '_' 强转为 '+' 和 '/'。
 	
-	// 1. 替换 URL-Safe 字符: 把 '-' 变 '+', 把 '_' 变 '/'
-	b64Str = strings.ReplaceAll(b64Str, "-", "+")
-	b64Str = strings.ReplaceAll(b64Str, "_", "/")
+	var cleanBuilder strings.Builder
+	for _, r := range rawStr {
+		switch {
+		// 合法字符直接保留
+		case r >= 'A' && r <= 'Z':
+			cleanBuilder.WriteRune(r)
+		case r >= 'a' && r <= 'z':
+			cleanBuilder.WriteRune(r)
+		case r >= '0' && r <= '9':
+			cleanBuilder.WriteRune(r)
+		
+		// 变体字符：强制标准化
+		case r == '+' || r == '-':
+			cleanBuilder.WriteRune('+')
+		case r == '/' || r == '_':
+			cleanBuilder.WriteRune('/')
+		
+		// 这里的 default 分支就是“垃圾桶”
+		// 任何空格、换行、引号、%号、NULL 都会被丢弃，不会进入解码器
+		}
+	}
+	cleanStr := cleanBuilder.String()
 
-	// 2. 手动补全 Padding ('=')
-	// Base64 长度必须是 4 的倍数，缺几位补几位
-	if mod := len(b64Str) % 4; mod != 0 {
-		b64Str += strings.Repeat("=", 4-mod)
+	// 补全 Padding ('=')
+	if m := len(cleanStr) % 4; m != 0 {
+		cleanStr += strings.Repeat("=", 4-m)
 	}
 
-	// 3. 使用标准解码器解码
-	// 因为上面已经清洗过了，这里理论上绝不会再报 illegal data
-	data, err := base64.StdEncoding.DecodeString(b64Str)
+	// 此时 cleanStr 只有纯净的 Standard Base64，绝无报错可能
+	data, err := base64.StdEncoding.DecodeString(cleanStr)
 	if err != nil {
-		return nil, fmt.Errorf("base64 decode error: %w", err)
+		return nil, fmt.Errorf("base64 decode error: %w | CleanStr: %s", err, cleanStr)
 	}
 
-	// 4. JSON 字符串清洗 (防止 \x00, \x0f 等不可见字符导致 JSON 解析失败)
+	// JSON 清洗（防止 JSON 内部的控制字符）
 	jsonStr := strings.TrimSpace(string(data))
 	jsonStr = strings.Trim(jsonStr, "\x00\x0f")
 
 	var p Payload
 	if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
-		return nil, fmt.Errorf("json unmarshal error: %w", err)
+		return nil, fmt.Errorf("json error: %w", err)
 	}
 	return &p, nil
 }
