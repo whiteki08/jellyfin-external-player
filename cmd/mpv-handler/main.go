@@ -76,31 +76,37 @@ func buildPotPlayerCmd(binPath string, p *Payload) *exec.Cmd {
 // 3. 核心逻辑：协议解析与清洗
 // ==========================================
 
-// parsePayload 解析 jelly-player://<Base64>
-// 支持返回单个指令或指令列表
+// parsePayload 解析 jelly-player://<Base64> 协议
 func parsePayload(rawURI string) ([]*Payload, error) {
 	prefix := "jelly-player://"
 	if !strings.HasPrefix(rawURI, prefix) {
-		return nil, fmt.Errorf("invalid scheme, must start with %s", prefix)
+		return nil, fmt.Errorf("invalid scheme")
 	}
 
-	// Step 1: 暴力清洗 (Vacuum Cleaner)
-	// 丢弃所有非 Base64 字符，强制归一化 URL-Safe 符号
+	// Step 1: 暴力清洗 (逻辑修正版)
 	rawStr := strings.TrimPrefix(rawURI, prefix)
 	var cleanBuilder strings.Builder
 	for _, r := range rawStr {
 		switch {
-		// 保留标准字符 (A-Z, a-z, 0-9)
+		// 1. 保留标准字符
 		case (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
 			cleanBuilder.WriteRune(r)
-		// 归一化变体 ('-' -> '+', '_' -> '/')
+		
+		// 2. 归一化 '-' -> '+'
 		case r == '-' || r == '+':
 			cleanBuilder.WriteRune('+')
-		case r == '_' || r == '/':
+		
+		// 3. 归一化 '_' -> '/' (这是 JS 发来的有效数据)
+		case r == '_':
 			cleanBuilder.WriteRune('/')
-		// 丢弃尾部斜杠、空格、引号等一切垃圾
+
+		// 4. 【关键修正】遇到 '/' 直接丢弃
+		// 因为 JS 发送的是 URL-Safe Base64，有效数据里绝对不会有 '/'。
+		// 所以任何 '/' 都是浏览器/系统加的垃圾。
 		case r == '/': 
 			continue
+			
+		// 5. 其他字符丢弃
 		}
 	}
 	cleanStr := cleanBuilder.String()
@@ -116,25 +122,26 @@ func parsePayload(rawURI string) ([]*Payload, error) {
 		return nil, fmt.Errorf("base64 error: %w | Cleaned: %s", err, cleanStr)
 	}
 
-	// Step 4: JSON 字符串清洗 (防止不可见字符)
+	// Step 4: JSON 字符串清洗
+	// 额外把 '?' 也加入清理列表，以防万一
 	jsonStr := strings.TrimSpace(string(data))
-	jsonStr = strings.Trim(jsonStr, "\x00\x0f")
+	jsonStr = strings.Trim(jsonStr, "\x00\x0f\n\r\t ?") 
 
 	var results []*Payload
 
-	// Step 5: 智能反序列化 (尝试 Array，失败则尝试 Object)
-	// 尝试解析为数组 [{}, {}] (Batch Mode)
+	// Step 5: 智能反序列化
+	// 尝试解析为数组
 	if err := json.Unmarshal([]byte(jsonStr), &results); err == nil {
 		return results, nil
 	}
 
-	// 尝试解析为单个对象 {} (Legacy Mode)
+	// 尝试解析为单个对象
 	var single Payload
 	if err := json.Unmarshal([]byte(jsonStr), &single); err != nil {
-		return nil, fmt.Errorf("json unmarshal error: %w | Data: %s", err, jsonStr)
+		return nil, fmt.Errorf("json error: %w | Data: %s", err, jsonStr)
 	}
 	results = append(results, &single)
-
+	
 	return results, nil
 }
 
