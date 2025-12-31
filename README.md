@@ -1,5 +1,3 @@
-# English Version
-
 # Jellyfin MPV Desktop Bridge (Fork)
 
 [中文](./README_zh.md)
